@@ -20,7 +20,7 @@ on:
 
 jobs:
   trigger-deployments:
-    runs-on: arc-medium
+    runs-on: ubuntu-latest
 
     steps:
       - name: Set repositories
