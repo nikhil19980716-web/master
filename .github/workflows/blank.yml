@@ -42,7 +42,7 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $TOKEN" \
               -H "Content-Type: application/json" \
-              https://api.github.com/repos/YOUR_ORG/$repo/actions/workflows/deploy.yml/dispatches \
+              https://api.github.com/repos/YOUR_ORG/$repo/actions/workflows/blank.yml/dispatches \
               -d "{
                 \"ref\": \"$BRANCH\",
                 \"inputs\": {
