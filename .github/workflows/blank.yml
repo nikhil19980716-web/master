@@ -10,8 +10,8 @@ on:
       environment:
         description: "Target environment"
         required: true
-        default: "dev"
         type: choice
+        default: dev
         options:
           - dev
           - uat
@@ -21,19 +21,32 @@ on:
 jobs:
   trigger-deployments:
     runs-on: arc-medium
+
     steps:
       - name: Set repositories
         run: |
-          echo "REPOS=Nikhil,sumedh,vaibhav,ajay," >> $GITHUB_ENV
+          echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
 
       - name: Trigger workflows in all repos
+        env:
+          BRANCH: ${{ github.event.inputs.branch }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         run: |
           IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
+
           for repo in "${REPO_ARRAY[@]}"; do
-            echo "Triggering $repo with branch ${{ github.event.inputs.branch }} and environment ${{ github.event.inputs.environment }}"
+            echo "Triggering deployment for $repo"
+
             curl -X POST \
               -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.PERSONAL_GITHUB_TOKEN }}" \
-              https://api.github.com/repos/YOUR_ORG/${repo}/actions/workflows/deploy.yml/dispatches \
-              -d "{\"ref\":\"${{ github.event.inputs.branch }}\",\"inputs\":{\"environment\":\"${{ github.event.inputs.environment }}\"}}"
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              https://api.github.com/repos/YOUR_ORG/$repo/actions/workflows/deploy.yml/dispatches \
+              -d "{
+                \"ref\": \"$BRANCH\",
+                \"inputs\": {
+                  \"environment\": \"$ENVIRONMENT\"
+                }
+              }"
           done
