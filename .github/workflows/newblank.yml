@@ -1,4 +1,4 @@
-name: new
+name: Multi Repo Deployment Monitor
 
 on:
   workflow_dispatch:
@@ -22,50 +22,81 @@ permissions:
   actions: write
 
 jobs:
-  trigger-deployments:
+  deploy-and-monitor:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set repositories
+      - name: Set repository list
         run: |
           echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
 
-      - name: Trigger workflows and collect status
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Trigger deployments
         env:
           TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          BRANCH: ${{ github.event.inputs.branch }}
-          ENVIRONMENT: ${{ github.event.inputs.environment }}
+          BRANCH: ${{ inputs.branch }}
+          ENV: ${{ inputs.environment }}
         run: |
-          echo "| Repository | Branch | Environment | Status |" >> summary.md
-          echo "|-----------|--------|-------------|--------|" >> summary.md
+          for repo in $(echo $REPOS | tr ',' ' '); do
+            echo "Triggering deployment for $repo"
 
-          IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
-
-          for repo in "${REPO_ARRAY[@]}"; do
-            echo "Triggering deployment for $repo (branch=$BRANCH, env=$ENVIRONMENT)"
-
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            curl -s -o /dev/null -w "%{http_code}\n" \
               -X POST \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $TOKEN" \
-              -H "Content-Type: application/json" \
               https://api.github.com/repos/nikhil19980716-web/$repo/actions/workflows/newblank.yml/dispatches \
               -d "{
                 \"ref\": \"$BRANCH\",
-                \"inputs\": {
-                  \"environment\": \"$ENVIRONMENT\"
-                }
-              }")
-
-            if [[ "$HTTP_CODE" == "204" ]]; then
-              STATUS="✅ Success"
-            else
-              STATUS="❌ Failed ($HTTP_CODE)"
-            fi
-
-            echo "| $repo | $BRANCH | $ENVIRONMENT | $STATUS |" >> summary.md
+                \"inputs\": { \"environment\": \"$ENV\" }
+              }"
           done
 
-      - name: Publish summary
+      - name: Monitor deployments and collect status
+        env:
+          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         run: |
+          echo "| Repository | Status |" >> summary.md
+          echo "|------------|--------|" >> summary.md
+
+          FAILED=0
+
+          for repo in $(echo $REPOS | tr ',' ' '); do
+            echo "Monitoring $repo..."
+
+            sleep 5
+
+            RUN_ID=$(curl -s \
+              -H "Authorization: Bearer $TOKEN" \
+              https://api.github.com/repos/nikhil19980716-web/$repo/actions/workflows/newblank.yml/runs \
+              | jq -r '.workflow_runs[0].id')
+
+            while true; do
+              RUN_DATA=$(curl -s \
+                -H "Authorization: Bearer $TOKEN" \
+                https://api.github.com/repos/nikhil19980716-web/$repo/actions/runs/$RUN_ID)
+
+              STATUS=$(echo "$RUN_DATA" | jq -r '.status')
+              RESULT=$(echo "$RUN_DATA" | jq -r '.conclusion')
+
+              if [[ "$STATUS" == "completed" ]]; then
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [[ "$RESULT" == "success" ]]; then
+              echo "| $repo | ✅ Success |" >> summary.md
+            else
+              echo "| $repo | ❌ Failed |" >> summary.md
+              FAILED=1
+            fi
+          done
+
           cat summary.md >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$FAILED" == "1" ]]; then
+            exit 1
+          fi
