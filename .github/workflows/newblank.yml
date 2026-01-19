@@ -1,8 +1,12 @@
-name: Deploy
+name: Deploy Multiple Repos (With Real Status)
 
 on:
   workflow_dispatch:
     inputs:
+      branch:
+        description: "Branch to deploy"
+        required: true
+        default: thandera
       environment:
         description: "Target environment"
         required: true
@@ -13,11 +17,76 @@ on:
           - prod
           - prod2
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
-  deploy:
+  trigger-and-monitor:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy application
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Trigger deployment
+        env:
+          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+          BRANCH: ${{ inputs.branch }}
+          ENV: ${{ inputs.environment }}
         run: |
-          echo "Deploying to ${{ inputs.environment }}"
-          sleep 10
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/workflows/123456789/dispatches \
+            -d "{
+              \"ref\": \"$BRANCH\",
+              \"inputs\": {
+                \"environment\": \"$ENV\"
+              }
+            }"
+
+      - name: Wait and fetch real deployment status
+        env:
+          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        run: |
+          echo "| Repository | Status |" >> summary.md
+          echo "|------------|--------|" >> summary.md
+
+          sleep 5
+
+          RUN_ID=$(curl -s \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs \
+            | jq -r '.workflow_runs[0].id')
+
+          if [[ "$RUN_ID" == "null" ]]; then
+            echo "❌ Workflow did not start"
+            exit 1
+          fi
+
+          while true; do
+            DATA=$(curl -s \
+              -H "Authorization: Bearer $TOKEN" \
+              https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs/$RUN_ID)
+
+            STATUS=$(echo "$DATA" | jq -r '.status')
+            RESULT=$(echo "$DATA" | jq -r '.conclusion')
+
+            echo "Status=$STATUS | Result=$RESULT"
+
+            if [[ "$STATUS" == "completed" ]]; then
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [[ "$RESULT" == "success" ]]; then
+            echo "| Nikhil | ✅ Success |" >> summary.md
+          else
+            echo "| Nikhil | ❌ Failed |" >> summary.md
+            exit 1
+          fi
+
+          cat summary.md >> $GITHUB_STEP_SUMMARY
