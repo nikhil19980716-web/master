@@ -1,4 +1,4 @@
-name: Deploy Multiple Repos
+name: new
 
 on:
   workflow_dispatch:
