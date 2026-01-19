@@ -1,14 +1,14 @@
-name: Deploy Multiple Repos (With Real Status)
+name: Deploy Multiple Repos (With Status)
 
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch to deploy"
+        description: Branch to deploy
         required: true
         default: thandera
       environment:
-        description: "Target environment"
+        description: Target environment
         required: true
         type: choice
         options:
@@ -22,71 +22,72 @@ permissions:
   actions: write
 
 jobs:
-  trigger-and-monitor:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: Define repositories
+        run: echo "REPOS=nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
 
-      - name: Trigger deployment
+      - name: Trigger and monitor deployments
         env:
-          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          BRANCH: ${{ inputs.branch }}
-          ENV: ${{ inputs.environment }}
+          GH_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+          OWNER: nikhil19980716-web
+          BRANCH: ${{ github.event.inputs.branch }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
         run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $TOKEN" \
-            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/workflows/123456789/dispatches \
-            -d "{
-              \"ref\": \"$BRANCH\",
-              \"inputs\": {
-                \"environment\": \"$ENV\"
-              }
-            }"
+          echo "| Repo | Run ID | Status |" >> summary.md
+          echo "|------|--------|--------|" >> summary.md
 
-      - name: Wait and fetch real deployment status
-        env:
-          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        run: |
-          echo "| Repository | Status |" >> summary.md
-          echo "|------------|--------|" >> summary.md
+          for repo in $(echo $REPOS | tr ',' ' '); do
+            echo "🚀 Triggering $repo"
 
-          sleep 5
+            # Get workflow ID
+            WF_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              https://api.github.com/repos/$OWNER/$repo/actions/workflows \
+              | jq -r '.workflows[] | select(.path==".github/workflows/deploy.yml") | .id')
 
-          RUN_ID=$(curl -s \
-            -H "Authorization: Bearer $TOKEN" \
-            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs \
-            | jq -r '.workflow_runs[0].id')
-
-          if [[ "$RUN_ID" == "null" ]]; then
-            echo "❌ Workflow did not start"
-            exit 1
-          fi
-
-          while true; do
-            DATA=$(curl -s \
-              -H "Authorization: Bearer $TOKEN" \
-              https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs/$RUN_ID)
-
-            STATUS=$(echo "$DATA" | jq -r '.status')
-            RESULT=$(echo "$DATA" | jq -r '.conclusion')
-
-            echo "Status=$STATUS | Result=$RESULT"
-
-            if [[ "$STATUS" == "completed" ]]; then
-              break
+            if [ -z "$WF_ID" ]; then
+              echo "| $repo | - | ❌ Workflow not found |" >> summary.md
+              continue
             fi
 
-            sleep 10
-          done
+            # Trigger workflow
+            TRIGGER_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              https://api.github.com/repos/$OWNER/$repo/actions/workflows/$WF_ID/dispatches \
+              -d "{
+                \"ref\": \"$BRANCH\",
+                \"inputs\": { \"environment\": \"$ENVIRONMENT\" }
+              }")
 
-          if [[ "$RESULT" == "success" ]]; then
-            echo "| Nikhil | ✅ Success |" >> summary.md
-          else
-            echo "| Nikhil | ❌ Failed |" >> summary.md
-            exit 1
-          fi
+            if [ "$TRIGGER_CODE" != "204" ]; then
+              echo "| $repo | - | ❌ Trigger failed ($TRIGGER_CODE) |" >> summary.md
+              continue
+            fi
 
-          cat summary.md >> $GITHUB_STEP_SUMMARY
+            echo "⏳ Waiting for run to start..."
+
+            sleep 5
+
+            RUN_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              https://api.github.com/repos/$OWNER/$repo/actions/workflows/$WF_ID/runs?branch=$BRANCH \
+              | jq -r '.workflow_runs[0].id')
+
+            if [ -z "$RUN_ID" ]; then
+              echo "| $repo | - | ❌ Run not found |" >> summary.md
+              continue
+            fi
+
+            # Poll status
+            while true; do
+              STATUS=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+                https://api.github.com/repos/$OWNER/$repo/actions/runs/$RUN_ID \
+                | jq -r '.status')
+
+              CONCLUSION=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+                https://api.github.com/repos/$OWNER/$repo/actions/runs/$RUN_ID \
+                | jq -r '.conclusion')
+
+              if [ "$STATUS" = "complete]()
