@@ -1,0 +1,53 @@
+name: Deploy Multiple Repos
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        default: thandera
+      environment:
+        required: true
+        type: choice
+        options:
+          - dev
+          - uat
+          - prod
+          - prod2
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  trigger-deployments:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set repositories
+        run: echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
+
+      - name: Trigger workflows
+        env:
+          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.inputs.branch }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
+
+          for repo in "${REPO_ARRAY[@]}"; do
+            echo "Triggering deployment for $repo"
+
+            curl -s -o /dev/null -w "%{http_code}\n" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              https://api.github.com/repos/nikhil19980716-web/$repo/actions/workflows/blank.yml/dispatches \
+              -d "{
+                \"ref\": \"$BRANCH\",
+                \"inputs\": {
+                  \"environment\": \"$ENVIRONMENT\"
+                }
+              }"
+          done
