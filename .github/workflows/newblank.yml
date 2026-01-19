@@ -4,11 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch to deploy"
         required: true
-        default: thandera
+        default: main
       environment:
-        description: "Target environment"
         required: true
         type: choice
         options:
@@ -22,81 +20,66 @@ permissions:
   actions: write
 
 jobs:
-  deploy-and-monitor:
+  deploy-nikhil:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set repository list
-        run: |
-          echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
-
       - name: Install jq
         run: sudo apt-get install -y jq
 
-      - name: Trigger deployments
+      - name: Trigger Nikhil deployment
         env:
           TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           BRANCH: ${{ inputs.branch }}
           ENV: ${{ inputs.environment }}
         run: |
-          for repo in $(echo $REPOS | tr ',' ' '); do
-            echo "Triggering deployment for $repo"
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/workflows/DEPLOY_WORKFLOW_ID/dispatches \
+            -d "{
+              \"ref\": \"$BRANCH\",
+              \"inputs\": { \"environment\": \"$ENV\" }
+            }"
 
-            curl -s -o /dev/null -w "%{http_code}\n" \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $TOKEN" \
-              https://api.github.com/repos/nikhil19980716-web/$repo/actions/workflows/newblank.yml/dispatches \
-              -d "{
-                \"ref\": \"$BRANCH\",
-                \"inputs\": { \"environment\": \"$ENV\" }
-              }"
-          done
-
-      - name: Monitor deployments and collect status
+      - name: Wait for deployment to complete
         env:
           TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         run: |
-          echo "| Repository | Status |" >> summary.md
-          echo "|------------|--------|" >> summary.md
+          echo "Waiting for workflow run..."
 
-          FAILED=0
+          sleep 5
 
-          for repo in $(echo $REPOS | tr ',' ' '); do
-            echo "Monitoring $repo..."
+          RUN_ID=$(curl -s \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs \
+            | jq -r '.workflow_runs[0].id')
 
-            sleep 5
-
-            RUN_ID=$(curl -s \
-              -H "Authorization: Bearer $TOKEN" \
-              https://api.github.com/repos/nikhil19980716-web/$repo/actions/workflows/newblank.yml/runs \
-              | jq -r '.workflow_runs[0].id')
-
-            while true; do
-              RUN_DATA=$(curl -s \
-                -H "Authorization: Bearer $TOKEN" \
-                https://api.github.com/repos/nikhil19980716-web/$repo/actions/runs/$RUN_ID)
-
-              STATUS=$(echo "$RUN_DATA" | jq -r '.status')
-              RESULT=$(echo "$RUN_DATA" | jq -r '.conclusion')
-
-              if [[ "$STATUS" == "completed" ]]; then
-                break
-              fi
-
-              sleep 10
-            done
-
-            if [[ "$RESULT" == "success" ]]; then
-              echo "| $repo | ✅ Success |" >> summary.md
-            else
-              echo "| $repo | ❌ Failed |" >> summary.md
-              FAILED=1
-            fi
-          done
-
-          cat summary.md >> $GITHUB_STEP_SUMMARY
-
-          if [[ "$FAILED" == "1" ]]; then
+          if [[ "$RUN_ID" == "null" ]]; then
+            echo "❌ Workflow did not start"
             exit 1
           fi
+
+          while true; do
+            DATA=$(curl -s \
+              -H "Authorization: Bearer $TOKEN" \
+              https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs/$RUN_ID)
+
+            STATUS=$(echo "$DATA" | jq -r '.status')
+            RESULT=$(echo "$DATA" | jq -r '.conclusion')
+
+            echo "Status: $STATUS | Result: $RESULT"
+
+            if [[ "$STATUS" == "completed" ]]; then
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [[ "$RESULT" != "success" ]]; then
+            echo "❌ Deployment FAILED"
+            exit 1
+          fi
+
+          echo "✅ Deployment SUCCESS"
