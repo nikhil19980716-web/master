@@ -4,9 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       branch:
+        description: "Branch to deploy"
         required: true
         default: thandera
       environment:
+        description: "Target environment"
         required: true
         type: choice
         options:
@@ -25,20 +27,24 @@ jobs:
 
     steps:
       - name: Set repositories
-        run: echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
+        run: |
+          echo "REPOS=Nikhil,sumedh,vaibhav,ajay" >> $GITHUB_ENV
 
-      - name: Trigger workflows
+      - name: Trigger workflows and collect status
         env:
           TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          BRANCH: ${{ github.event.inputs.branch }}
-          ENVIRONMENT: ${{ github.event.inputs.environment }}
+          BRANCH: ${{ inputs.branch }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
+          echo "| Repository | Branch | Environment | Status |" >> summary.md
+          echo "|-----------|--------|-------------|--------|" >> summary.md
+
           IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
 
           for repo in "${REPO_ARRAY[@]}"; do
             echo "Triggering deployment for $repo"
 
-            curl -s -o /dev/null -w "%{http_code}\n" \
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -X POST \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $TOKEN" \
@@ -49,5 +55,17 @@ jobs:
                 \"inputs\": {
                   \"environment\": \"$ENVIRONMENT\"
                 }
-              }"
+              }")
+
+            if [[ "$HTTP_CODE" == "204" ]]; then
+              STATUS="✅ Success"
+            else
+              STATUS="❌ Failed ($HTTP_CODE)"
+            fi
+
+            echo "| $repo | $BRANCH | $ENVIRONMENT | $STATUS |" >> summary.md
           done
+
+      - name: Publish summary
+        run: |
+          cat summary.md >> $GITHUB_STEP_SUMMARY
