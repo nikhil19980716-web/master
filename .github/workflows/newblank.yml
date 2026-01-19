@@ -1,12 +1,10 @@
-name: Multi Repo Deployment Monitor
+name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        required: true
-        default: main
       environment:
+        description: "Target environment"
         required: true
         type: choice
         options:
@@ -15,71 +13,11 @@ on:
           - prod
           - prod2
 
-permissions:
-  contents: read
-  actions: write
-
 jobs:
-  deploy-nikhil:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Trigger Nikhil deployment
-        env:
-          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          BRANCH: ${{ inputs.branch }}
-          ENV: ${{ inputs.environment }}
+      - name: Deploy application
         run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $TOKEN" \
-            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/workflows/DEPLOY_WORKFLOW_ID/dispatches \
-            -d "{
-              \"ref\": \"$BRANCH\",
-              \"inputs\": { \"environment\": \"$ENV\" }
-            }"
-
-      - name: Wait for deployment to complete
-        env:
-          TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-        run: |
-          echo "Waiting for workflow run..."
-
-          sleep 5
-
-          RUN_ID=$(curl -s \
-            -H "Authorization: Bearer $TOKEN" \
-            https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs \
-            | jq -r '.workflow_runs[0].id')
-
-          if [[ "$RUN_ID" == "null" ]]; then
-            echo "❌ Workflow did not start"
-            exit 1
-          fi
-
-          while true; do
-            DATA=$(curl -s \
-              -H "Authorization: Bearer $TOKEN" \
-              https://api.github.com/repos/nikhil19980716-web/Nikhil/actions/runs/$RUN_ID)
-
-            STATUS=$(echo "$DATA" | jq -r '.status')
-            RESULT=$(echo "$DATA" | jq -r '.conclusion')
-
-            echo "Status: $STATUS | Result: $RESULT"
-
-            if [[ "$STATUS" == "completed" ]]; then
-              break
-            fi
-
-            sleep 10
-          done
-
-          if [[ "$RESULT" != "success" ]]; then
-            echo "❌ Deployment FAILED"
-            exit 1
-          fi
-
-          echo "✅ Deployment SUCCESS"
+          echo "Deploying to ${{ inputs.environment }}"
+          sleep 10
